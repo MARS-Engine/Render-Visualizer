@@ -1,0 +1,3 @@
+[submodule "mars"]
+	path = mars
+	url = https://github.com/MARS-Engine/MARS.git
