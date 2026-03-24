@@ -1,0 +1,83 @@
+BasedOnStyle: LLVM
+IndentWidth: 4
+UseTab: Always
+TabWidth: 4
+
+# Naming - enforced via clang-tidy, not clang-format, but keep consistent
+# Use .clang-tidy for naming enforcement
+
+# Braces: single-statement bodies have no braces, multi-statement get them
+# "Attach" means opening brace on same line as control statement
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: false
+  AfterClass: false
+  AfterStruct: false
+  AfterEnum: false
+  AfterNamespace: false
+  AfterControlStatement: Never
+  BeforeElse: false
+  BeforeCatch: false
+
+RemoveBracesLLVM: true 
+InsertBraces: false
+
+# Force single-line everything - no breaking across lines
+AllowShortFunctionsOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: true
+AllowShortBlocksOnASingleLine: Always
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortLambdasOnASingleLine: All
+AllowShortEnumsOnASingleLine: true
+AllowAllParametersOfDeclarationOnNextLine: false
+AllowAllArgumentsOnNextLine: false
+
+# Never break function declarations/calls/args across lines
+BinPackParameters: BinPack
+BinPackArguments: true
+PenaltyBreakBeforeFirstCallParameter: 1000000
+PenaltyReturnTypeOnItsOwnLine: 1000000
+PenaltyBreakAssignment: 1000000
+PenaltyBreakString: 1000000
+PenaltyExcessCharacter: 1000000
+PenaltyBreakOpenParenthesis: 1000000
+PenaltyBreakFirstLessLess: 1000000
+
+# Set column limit very high to prevent wrapping
+ColumnLimit: 0
+
+# Pointer/reference alignment: left (const int* var, const int& var2)
+PointerAlignment: Left
+ReferenceAlignment: Left
+DerivePointerAlignment: false
+
+# Spaces
+SpaceBeforeParens: ControlStatements
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeRangeBasedForLoopColon: true
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+SpacesInAngles: false
+
+# Includes
+SortIncludes: true
+IncludeBlocks: Preserve
+
+# Line endings
+LineEnding: LF
+
+# Other
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+AlignTrailingComments: true
+ReflowComments: false
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+
+# C++ specific
+Standard: Latest
+NamespaceIndentation: None
+FixNamespaceComments: true
+
+AlignAfterOpenBracket: BlockIndent
