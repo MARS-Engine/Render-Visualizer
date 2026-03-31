@@ -1,60 +1,172 @@
-Render Visualizer
-=======================================
+# Render Visualizer
 
-| System | purpose |
-|---|---|
-| Node Reflection | Turn annotated C++ node types into runtime node metadata (pins, hooks, editor callbacks). |
-| Node Graph | Hold the editor's nodes, links, functions, and helper queries. |
-| Blackboard | Global, reflected runtime state (time, camera, inputs) accessible to nodes. |
-| Graph Builder | Validate the graph and produce a `graph_execution_plan` (build steps + function plans). |
-| Graph Execution Plan | The compiled output of the builder: root node, VM stack, build steps, function plans. |
-| Graph Executor | Consumes the execution plan to build resources and drive the VM each frame. |
-| VM Stack & Slots | Compiled slot layout for passing values between nodes and functions. |
-| Execution / Runtime | Owns the builder, plan, and executor; coordinates the build and render loop. |
-| Frames & Call Stack | Per-function storage and simple call-stack semantics for function calls. |
-| Execution Context | Safe, typed helpers for node hooks to read/write data and call functions. |
-| Persistence & Editor Integration | Save/load graphs and let nodes provide editor UI and dynamic pins. |
+Render Visualizer is a node-based visual scripting playground built on top of MARS. It is focused on experimenting with reflection-driven node authoring, editor tooling, and a small runtime that can compile a graph into an executable frame pipeline.
 
-Node Reflection
-- Why it matters: You write a C++ struct or annotated type and reflection makes it a usable node without a ton of glue code.
-- Look at: [node_registration.hpp](include/render_visualizer/node_registration.hpp)
+The project is intentionally small and iteration-friendly. Nodes are described as normal C++ structs, pins are discovered through static reflection, and the editor uses that metadata to draw the graph, expose an inspector, and build a runtime execution stack.
 
-Node Graph
-- Why it matters: This is the editor's source-of-truth, everything you see in the UI is represented here.
-- Look at: [node_graph.hpp](include/render_visualizer/node_graph.hpp)
+## 🚧 Status
 
-Blackboard
-- Why it matters: Useful global state (frame time, camera) lives here and is easily visible to nodes.
-- Look at: [graph_blackboard.hpp](include/render_visualizer/graph_blackboard.hpp)
+This project is still in an active prototyping phase. The core editor loop is already there, but the app is still growing and some systems are deliberately lightweight while the architecture settles.
 
-Graph Builder / Compiler
-- Why it matters: Ensures the graph is valid, computes the order to build resources, and compiles function layouts. Its sole output is a `graph_execution_plan` stored on the runtime.
-+ Look at: [runtime_plan_builder.cpp](src/runtime/runtime_plan_builder.cpp) and [runtime_slot_compiler.cpp](src/runtime/runtime_slot_compiler.cpp)
+## What This App Is
 
-Graph Execution Plan
-- Why it matters: The explicit boundary between the builder and executor. Holds everything the executor needs: `root_node_id`, the `vm_stack`, `build_steps`, and `function_plans`. Clearing it (`plan = {}`) is all that is needed to reset compiled state.
-- Look at: `graph_execution_plan` in [stack.hpp](include/render_visualizer/runtime/stack.hpp)
+Render Visualizer is being built as a node editor powered by static reflection, with the long-term goal of authoring complete graphics render pipelines from start to finish entirely through nodes.
 
-VM Stack & Slots
-- Why it matters: The runtime talks to nodes by slot index (fast, compact), changes here affect how values flow between nodes.
-- Look at: [stack.hpp](include/render_visualizer/runtime/stack.hpp)
+That includes the full range of rendering workflow we care about, from traditional passes all the way to raytracing. The idea is not just to make a generic scripting graph, but to make a graph-driven renderer authoring environment where rendering features, resources, passes, and execution flow can all be assembled visually.
 
-Graph Executor
-- Why it matters: Reads the execution plan produced by the builder, executes build steps to create GPU resources, and runs setup/render function chains each frame via the VM.
-+ Look at: [runtime_vm_execution.cpp](src/runtime/runtime_vm_execution.cpp)
+This direction is not purely theoretical. We already prototyped this idea in the past, including a raytracing-capable version, using AI heavily for rapid experimentation. That prototype proved that the approach works. This codebase is the rewrite from scratch, with a stronger focus on code quality, maintainability, and cleaner architecture.
 
-Execution / Runtime
-- Why it matters: Top-level owner of the builder, plan, and executor. Exposes `tick()`, `record_pre_swapchain()`, and the accessors that node hooks call to read/write slot values.
-+ Look at: [runtime_facade.cpp](src/runtime/runtime_facade.cpp) and [runtime.hpp](include/render_visualizer/runtime.hpp)
+Instead of hardcoding every node, pin, inspector widget, and runtime binding by hand, this project uses static reflection to infer a lot of that structure automatically:
 
-Frames & Call Stack
-- Why it matters: Frames hold per-function local state and back the simple function-call model used by nodes.
-+ Look at: [runtime_stack.cpp](src/runtime/runtime_stack.cpp) and [stack.hpp](include/render_visualizer/runtime/stack.hpp)
+- `[[=rv::input]]` and `[[=rv::output]]` define data pins.
+- `[[=rv::execute]]` marks the member function that the runtime should call.
+- `[[=rv::node_pure()]]` marks nodes that should not get execution pins.
 
-Execution Context & Services
-- Why it matters: Node hooks use this to read inputs, push outputs, access blackboard values, and call functions safely.
-- Look at: [execution_context.hpp](include/render_visualizer/execution_context.hpp)
+That metadata then flows through the whole app, from the editor all the way into the runtime executor.
 
-Persistence & Editor Integration
-- Why it matters: Save/load is simple, and node reflection enables editor UI hooks and dynamic pin behavior.
-+ Look at: [graph_persistence.hpp](include/render_visualizer/graph_persistence.hpp) and the editor-related callbacks in [node_registration.hpp](include/render_visualizer/node_registration.hpp)
+## Core Systems
+
+### Blackboard Canvas 🧭
+
+The blackboard is the central node-editing surface. It is responsible for:
+
+- Drawing the background grid
+- Laying out nodes and pins
+- Rendering links as cubic beziers
+- Converting graph-space positions into screen-space positions
+- Maintaining the camera offset used when panning the graph
+
+This system is what makes nodes feel like editor objects instead of raw data records. It also caches node sizes so hit-testing and drawing use the same layout information.
+
+### Reflection and Node Metadata 🧠
+
+The reflection layer is the backbone of the project. A node type is just a reflected C++ struct with annotated fields and an execute function.
+
+From that, the app derives:
+
+- Display name
+- Input and output pin lists
+- Pin colours and type hashes
+- Whether the node is pure or execution-driven
+- Runtime member access for pin values
+- The member function that should be invoked at runtime
+- Inspector widgets for editable inputs
+
+This keeps the editor and runtime talking about the same node shape, instead of maintaining separate definitions for authoring and execution.
+
+### Node Registry 📚
+
+The registry is the catalog of node types that the editor knows how to spawn. When a node type is registered, the editor can:
+
+- Show it in the right-click context menu
+- Create an instance for it in the graph
+- Ask it for pin metadata
+- Ask it for runtime metadata
+
+The registry is intentionally simple right now, but it is the bridge between "this type exists in code" and "this node can appear in the editor."
+
+### Graph Builder 🏗️
+
+The graph builder owns the editable graph state. Each graph node stores:
+
+- A unique node id
+- Position and cached size
+- A reflected instance of the node's C++ type
+- The node's link data
+- Selection state
+- Runtime metadata used for compilation
+
+It is also the system that turns editor state into runtime state. When execution starts, the graph builder walks the graph from the built-in `Start` node and compiles it into:
+
+- An aligned `frame_stack`
+- One stack object per reachable non-Start node
+- A linear execution schedule
+- Precomputed pin-copy operations
+- A vector of opaque execute-member handles
+
+Unconnected inputs are seeded from the current editor instance, which means inspector edits naturally feed into the runtime build.
+
+### UI State Manager 🖱️
+
+The UI state manager is the interaction layer for the blackboard. It listens to the MARS window event system and translates mouse input into editor behavior:
+
+- Node selection
+- Title-bar dragging
+- Pin linking
+- Context-menu spawning
+- Middle-mouse camera panning
+
+It is deliberately separate from rendering, which keeps the drawing code focused on visuals and the state manager focused on interaction rules.
+
+### Side Panels and Inspector 🪟
+
+The app currently has a minimal shell around the canvas:
+
+- Left drawer: reserved for future tools
+- Right drawer: overview and inspector panels
+
+The overview panel already controls runtime execution with `Start` and `Stop`. The inspector panel shows the currently selected node's non-execution input pins and renders them through MARS ImGui reflection helpers.
+
+That means editing a node input in the inspector updates the underlying node instance directly, and the runtime can rebuild from that edited state.
+
+### Frame Stack and Frame Executor ⚙️
+
+The runtime side is intentionally explicit.
+
+The `frame_stack` owns the actual runtime node objects in aligned storage. When a graph is compiled, each reachable runtime node is copy-constructed into that stack from the editor-side instance.
+
+The `frame_executor` then runs every frame while execution is active:
+
+1. For the next scheduled node, copy connected input values from upstream node outputs
+2. Look up the node object in the frame stack
+3. Invoke the reflected execute member on that object
+
+Pure nodes are scheduled immediately before the execution node that consumes them, so they behave like data dependencies in the compiled frame.
+
+## Execution Model
+
+The current execution model is intentionally small and strict:
+
+- Execution starts from a unique built-in `Start` node
+- Execution links form a single forward path
+- Execution outputs can only target one next execution input
+- Data outputs can fan out to multiple consumers
+- Each input pin can only have one source
+- Pure dependencies are expanded before their consumer during compilation
+
+If the graph becomes invalid for runtime compilation, execution does not start and the builder reports an error instead of guessing.
+
+## Platform Support
+
+This app is built on top of MARS, so its practical platform story currently follows the same direction: Windows and Linux are the intended targets, while macOS is not a focus at the moment.
+
+| Platform   | Supported | Notes |
+|------------|-----------|-------|
+| Windows 11 | ✅ | Primary development target |
+| Linux      | ✅ | Expected to work alongside the MARS stack |
+| macOS      | ❌ | Not currently targeted |
+
+## Dependencies
+
+Most of the heavy lifting comes from the local MARS engine dependency and the libraries it already integrates.
+
+| Dependency | Role | Notes |
+|---|---|---|
+| MARS | Engine / platform layer | Provides rendering, events, math, reflection helpers, and ImGui integration |
+| Dear ImGui | Editor UI | Used for the blackboard, drawers, inspector, and context menus |
+| SDL3 | Windowing and input | Routed through the MARS window abstraction |
+| Clang P2996 reflection fork | Static reflection | Required for the reflection-heavy node and runtime systems |
+
+## Current Direction
+
+The project already has the full loop of:
+
+- Define a node in C++
+- Register it
+- Spawn it in the editor
+- Inspect and edit its inputs
+- Link it into a graph
+- Compile it into a runtime frame
+- Execute it every frame
+
+The next layer is mostly about depth and polish: richer graph validation, more editor tools, better inspection, and a broader runtime model.
