@@ -23,6 +23,7 @@
 #include <mars/graphics/object/pass_scope.hpp>
 #include <mars/graphics/object/swapchain.hpp>
 #include <mars/imgui/backend_bridge.hpp>
+#include <mars/engine/input.hpp>
 
 #include <SDL3/SDL_video.h>
 
@@ -79,6 +80,7 @@ struct app_window_state {
 
 app_window_state g_main_window_state;
 bool g_running = true;
+rv::graph_builder g_graph;
 
 void on_main_window_resize(mars::window&, const mars::vector2<size_t>& _size) {
 	if (_size.x == 0 || _size.y == 0)
@@ -90,6 +92,11 @@ void on_main_window_resize(mars::window&, const mars::vector2<size_t>& _size) {
 
 void on_main_window_close(mars::window&) {
 	g_main_window_state.close_requested = true;
+}
+
+void on_delete(mars::input&) {
+	if (g_graph.remove_selected_node())
+		mars::logger::log(g_app_log_channel, "Removed selected node");
 }
 
 enum app_backend_option {
@@ -132,6 +139,10 @@ int main(int _argc, char* _argv[]) {
 	g_main_window_state.window.listen<&mars::window_event::on_close, &on_main_window_close>();
 	g_main_window_state.window.listen<&mars::window_event::on_resize, &on_main_window_resize>();
 
+	mars::input input;
+	mars::input_create(input, g_main_window_state.window);
+	input.bind<"delete", &on_delete>();
+
 	mars::vector2<size_t> frame_size = g_main_window_state.window.size;
 
 	mars::device device = mars::graphics::device_create(engine);
@@ -149,9 +160,8 @@ int main(int _argc, char* _argv[]) {
 		rv::blackboard_font_set(ne_font, 16.0f);
 
 		rv::node_registry registry = {};
-		rv::graph_builder graph = {};
 
-		rv::ui_state_manager ui_state(&graph, &registry);
+		rv::ui_state_manager ui_state(&g_graph, &registry);
 		rv::frame_executor executor = {};
 
 		g_main_window_state.window.listen<&mars::window_event::on_mouse_change, &rv::ui_state_manager::on_window_mouse_change>(ui_state);
@@ -181,24 +191,24 @@ int main(int _argc, char* _argv[]) {
 
 			rv::blackboard_render_begin();
 			ui_state.render_links();
-			for (rv::graph_builder_node& node : graph)
+			for (rv::graph_builder_node& node : g_graph)
 				rv::node_draw(node);
 			ui_state.render();
 			rv::blackboard_render_end();
-			const rv::ui_render_result ui_result = rv::ui_render(graph, executor.running());
+			const rv::ui_render_result ui_result = rv::ui_render(g_graph, executor.running());
 			if (ui_result.graph_inputs_changed)
-				graph.mark_runtime_dirty();
+				g_graph.mark_runtime_dirty();
 			if (ui_result.stop_requested)
 				executor.stop();
 			if (ui_result.start_requested) {
-				rv::graph_frame_build_result build = graph.build_frame();
+				rv::graph_frame_build_result build = g_graph.build_frame();
 				if (build.valid)
 					executor.start(std::move(build));
 				else
 					mars::logger::error(g_app_log_channel, "Failed to start graph execution: {}", build.error_message);
 			}
-			if (executor.running() && graph.runtime_revision() != executor.source_revision()) {
-				rv::graph_frame_build_result build = graph.build_frame();
+			if (executor.running() && g_graph.runtime_revision() != executor.source_revision()) {
+				rv::graph_frame_build_result build = g_graph.build_frame();
 				if (build.valid)
 					executor.start(std::move(build));
 				else {

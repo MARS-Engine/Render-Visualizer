@@ -105,6 +105,9 @@ public:
 	const graph_builder_node* selected_node() const;
 	const graph_builder_node* start_node() const;
 
+	bool remove_node(std::uint16_t _id);
+	bool remove_selected_node();
+
 	static void collect_pins(const graph_builder_node& _node, std::vector<pin_draw_data>& _inputs, std::vector<pin_draw_data>& _outputs);
 	static std::optional<pin_draw_data> find_pin(const graph_builder_node& _node, std::string_view _pin_name, bool _is_output);
 
