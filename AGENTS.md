@@ -61,3 +61,7 @@ void process_data(std::vector<int>& _data) {
     std::ranges::sort(_data);
 }
 ```
+
+
+## Compiling Rules
+When compiling always use the efficient-compiler tool. Never under any circumstances should you call ninja or cmake manually. If you want to compile always use efficient-compiler tool. if you cannot do not use anything

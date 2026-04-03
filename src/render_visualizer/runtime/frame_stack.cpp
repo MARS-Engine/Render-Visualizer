@@ -50,7 +50,7 @@ void rv::frame_stack::clear() {
 		stack_entry& entry = entries[entry_index - 1];
 		if (!entry.constructed || entry.destroy == nullptr)
 			continue;
-		entry.destroy(entry_ptr(entry_index - 1));
+		entry.destroy(mars::meta::type_erased_ptr(entry_ptr(entry_index - 1)));
 		entry.constructed = false;
 	}
 
@@ -92,9 +92,9 @@ void rv::frame_stack::initialize(const std::vector<frame_type_info>& _types) {
 	data = static_cast<std::byte*>(::operator new(data_size, std::align_val_t(data_alignment)));
 	for (std::size_t type_index = 0; type_index < _types.size(); ++type_index) {
 		const frame_type_info& type = _types[type_index];
-		if (type.copy_construct == nullptr || type.source_instance == nullptr)
+		if (type.copy_construct == nullptr || type.source_instance.get<void>() == nullptr)
 			continue;
-		type.copy_construct(entry_ptr(type_index), type.source_instance);
+		type.copy_construct(mars::meta::type_erased_ptr(entry_ptr(type_index)), type.source_instance);
 		entries[type_index].constructed = true;
 	}
 }

@@ -1,10 +1,13 @@
-#include <imgui.h>
+#include <imgui_internal.h>
 
 #include <render_visualizer/blackboard.hpp>
 #include <render_visualizer/node/node_reflection.hpp>
 #include <render_visualizer/node/node_registry.hpp>
+#include <render_visualizer/nodes/add_node.hpp>
+#include <render_visualizer/nodes/print_node.hpp>
+#include <render_visualizer/nodes/variable_nodes.hpp>
 #include <render_visualizer/runtime/frame_executor.hpp>
-#include <render_visualizer/runtime/graph_builder.hpp>
+#include <render_visualizer/type_reflection.hpp>
 #include <render_visualizer/ui/ui_render.hpp>
 #include <render_visualizer/ui/ui_state_manager.hpp>
 
@@ -28,9 +31,11 @@
 #include <SDL3/SDL_video.h>
 
 #include <iostream>
+#include <memory>
 #include <string_view>
 #include <utility>
 #include <vector>
+#include <malloc.h>
 
 namespace rv {
 
@@ -41,30 +46,6 @@ struct[[= mars::prop::rp_uses_swapchain()]]
 	main_pass_desc {};
 
 } // namespace rv
-
-struct [[=mars::meta::display("Add Node")]]
-	   [[=rv::node_pure()]]
-	add_node {
-	[[=rv::input]] float a;
-	[[=rv::input]] float b;
-	[[=rv::output]] float result;
-
-	[[=rv::execute]]
-	void execute() {
-		result = a + b;
-	}
-};
-inline const auto g_add_node_registration = rv::auto_register_node_v<add_node>;
-
-struct [[=mars::meta::display("Print Node")]] print_node {
-	[[=rv::input]] float a;
-
-	[[=rv::execute]]
-	void execute() {
-		std::cout << "Print Node: " << a << "\n";
-	}
-};
-inline const auto g_print_node_registration = rv::auto_register_node_v<print_node>;
 
 namespace {
 
@@ -80,7 +61,8 @@ struct app_window_state {
 
 app_window_state g_main_window_state;
 bool g_running = true;
-rv::graph_builder g_graph;
+
+rv::frame_executor g_project;
 
 void on_main_window_resize(mars::window&, const mars::vector2<size_t>& _size) {
 	if (_size.x == 0 || _size.y == 0)
@@ -95,7 +77,7 @@ void on_main_window_close(mars::window&) {
 }
 
 void on_delete(mars::input&) {
-	if (g_graph.remove_selected_node())
+	if (g_project.remove_selected_node())
 		mars::logger::log(g_app_log_channel, "Removed selected node");
 }
 
@@ -160,9 +142,9 @@ int main(int _argc, char* _argv[]) {
 		rv::blackboard_font_set(ne_font, 16.0f);
 
 		rv::node_registry registry = {};
+		rv::selection_manager selection;
 
-		rv::ui_state_manager ui_state(&g_graph, &registry);
-		rv::frame_executor executor = {};
+		rv::ui_state_manager ui_state(&g_project.active_function().graph, &registry, &selection);
 
 		g_main_window_state.window.listen<&mars::window_event::on_mouse_change, &rv::ui_state_manager::on_window_mouse_change>(ui_state);
 		g_main_window_state.window.listen<&mars::window_event::on_mouse_motion, &rv::ui_state_manager::on_window_mouse_motion>(ui_state);
@@ -189,36 +171,82 @@ int main(int _argc, char* _argv[]) {
 
 			mars::imgui::new_frame();
 
+			rv::function_instance& active_func = g_project.active_function();
+
 			rv::blackboard_render_begin();
 			ui_state.render_links();
-			for (rv::graph_builder_node& node : g_graph)
+			for (rv::graph_builder_node& node : active_func.graph)
 				rv::node_draw(node);
-			ui_state.render();
-			rv::blackboard_render_end();
-			const rv::ui_render_result ui_result = rv::ui_render(g_graph, executor.running());
-			if (ui_result.graph_inputs_changed)
-				g_graph.mark_runtime_dirty();
-			if (ui_result.stop_requested)
-				executor.stop();
-			if (ui_result.start_requested) {
-				rv::graph_frame_build_result build = g_graph.build_frame();
-				if (build.valid)
-					executor.start(std::move(build));
-				else
-					mars::logger::error(g_app_log_channel, "Failed to start graph execution: {}", build.error_message);
-			}
-			if (executor.running() && g_graph.runtime_revision() != executor.source_revision()) {
-				rv::graph_frame_build_result build = g_graph.build_frame();
-				if (build.valid)
-					executor.start(std::move(build));
-				else {
-					mars::logger::error(g_app_log_channel, "Failed to rebuild graph execution: {}", build.error_message);
-					executor.stop();
+			rv::ui_state_manager::render_result state_res = ui_state.render();
+
+			{
+				ImGuiWindow* window = ImGui::GetCurrentWindow();
+				const ImVec2 origin = ImGui::GetCursorScreenPos();
+				const ImVec2 window_size = ImGui::GetContentRegionAvail();
+				const ImRect canvas_drop_rect(ImVec2(origin.x, origin.y), ImVec2(origin.x + window_size.x, origin.y + window_size.y));
+
+				if (ImGui::BeginDragDropTargetCustom(canvas_drop_rect, window->GetID("##canvas_variable_drop_target"))) {
+					if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("RV_VARIABLE")) {
+						if (payload->DataSize == sizeof(std::size_t) && payload->IsDelivery()) {
+							std::size_t var_idx = *(const std::size_t*)payload->Data;
+							ImVec2 mouse_pos = ImGui::GetMousePos();
+							ui_state.open_variable_drop_menu(var_idx, {mouse_pos.x, mouse_pos.y});
+						}
+					}
+					ImGui::EndDragDropTarget();
 				}
 			}
-			if (executor.running())
-				executor.tick();
-			
+
+			rv::blackboard_render_end();
+
+			if (state_res.create_variable_node.has_value()) {
+				std::size_t var_idx = state_res.create_variable_node->first;
+				bool is_set = state_res.create_variable_node->second;
+				if (var_idx < g_project.global_variables().size()) {
+					auto& var = g_project.global_variables()[var_idx];
+					mars::vector2<float> canvas_pos = rv::blackboard_screen_to_canvas(state_res.drop_position);
+					rv::graph_builder_node* node = nullptr;
+
+					if (is_set) {
+						node = &active_func.graph.add<rv::set_variable_node>(canvas_pos);
+						node->instance_ptr.get<rv::set_variable_node>()->var = var.get();
+					} else {
+						node = &active_func.graph.add<rv::get_variable_node>(canvas_pos);
+						node->instance_ptr.get<rv::get_variable_node>()->var = var.get();
+					}
+
+					active_func.graph.mark_runtime_dirty();
+				}
+			}
+
+			const rv::ui_render_result ui_result = rv::ui_render(
+				g_project.functions(), g_project.active_function_index(),
+				g_project.global_variables(), selection, active_func.graph, g_project.running());
+
+			const std::size_t prev_func = g_project.active_function_index();
+
+			if (ui_result.start_requested)
+				g_project.start(g_project.active_function().graph);
+			if (ui_result.stop_requested)
+				g_project.stop();
+			if (ui_result.graph_inputs_changed)
+				g_project.active_function().graph.mark_runtime_dirty();
+			if (ui_result.create_function_requested)
+				g_project.create_function("New Function " + std::to_string(g_project.functions().size()));
+			if (ui_result.select_function_index.has_value())
+				g_project.select_function(*ui_result.select_function_index);
+			if (ui_result.delete_function_index.has_value())
+				g_project.delete_function(*ui_result.delete_function_index);
+			if (ui_result.create_variable_requested)
+				g_project.create_variable("New Variable " + std::to_string(g_project.global_variables().size()));
+			if (ui_result.delete_variable_index.has_value())
+				g_project.delete_variable(*ui_result.delete_variable_index, selection);
+
+			if (g_project.active_function_index() != prev_func || ui_result.delete_function_index.has_value())
+				ui_state.set_builder(&g_project.active_function().graph);
+
+			g_project.tick();
+
 			ImGui::Render();
 
 			const size_t back_buffer = swapchain.back_buffer_index();

@@ -1,3 +1,6 @@
 [submodule "mars"]
 	path = mars
 	url = https://github.com/MARS-Engine/MARS.git
+[submodule "tools"]
+	path = tools
+	url = https://github.com/MARS-Engine/mcp.git

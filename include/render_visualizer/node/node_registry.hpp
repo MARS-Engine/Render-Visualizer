@@ -5,6 +5,8 @@
 #include <mars/hash/meta.hpp>
 #include <mars/meta/type_erased.hpp>
 
+#include <render_visualizer/node/node_metadata.hpp>
+
 #include <cstddef>
 #include <memory>
 #include <string_view>
@@ -12,14 +14,13 @@
 
 namespace rv {
 
-using pin_draw_info_fn = void (*)(std::vector<pin_draw_data>& _inputs, std::vector<pin_draw_data>& _outputs);
+using pin_draw_info_fn = void (*)(mars::meta::type_erased_ptr _instance, std::vector<pin_draw_data>& _inputs, std::vector<pin_draw_data>& _outputs);
 struct node_instance_storage {
 	std::shared_ptr<void> storage = {};
 	mars::meta::type_erased_ptr ptr = {};
 };
 
 using node_instance_create_fn = node_instance_storage (*)();
-using node_runtime_info_fn = node_runtime_info (*)();
 
 namespace detail {
 
@@ -37,8 +38,9 @@ node_instance_storage create_node_instance() {
 struct node_registry_entry {
 	std::size_t type_hash = 0;
 	std::string_view name = {};
+	bool hidden = false;
+	node_metadata metadata = {};
 	pin_draw_info_fn get_pin_draw_info = nullptr;
-	node_runtime_info_fn get_runtime_info = nullptr;
 	node_instance_create_fn create_instance = nullptr;
 };
 
@@ -59,8 +61,9 @@ public:
 		add({
 			.type_hash = mars::hash::type_fingerprint_v<T>,
 			.name = node_reflection<T>::name,
+			.hidden = node_reflection<T>::hidden,
+			.metadata = node_reflection<T>::get_metadata(),
 			.get_pin_draw_info = &node_reflection<T>::get_pin_draw_info,
-			.get_runtime_info = &node_reflection<T>::get_runtime_info,
 			.create_instance = &detail::create_node_instance<T>
 		});
 	}

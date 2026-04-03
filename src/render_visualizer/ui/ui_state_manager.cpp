@@ -54,7 +54,22 @@ std::optional<resolved_pin> pin_resolve(const graph_builder_node& _node, std::st
 
 } // namespace
 
-ui_state_manager::ui_state_manager(graph_builder* _builder, const node_registry* _registry) : m_builder(_builder), m_registry(_registry) {
+ui_state_manager::ui_state_manager(graph_builder* _builder, const node_registry* _registry, selection_manager* _selection) : m_builder(_builder), m_registry(_registry), m_selection(_selection) {
+	if (m_selection != nullptr) {
+		m_selection->listen<&selection_event::on_selection_changed, &ui_state_manager::on_selection_manager_changed>(*this);
+	}
+}
+
+void ui_state_manager::on_selection_manager_changed(const mars::meta::type_erased_ptr& _selection, ui_state_manager& _manager) {
+	if (_manager.m_builder && _selection.get<graph_builder_node>() == nullptr) {
+		_manager.m_builder->clear_selection();
+	}
+}
+
+void ui_state_manager::set_builder(graph_builder* _builder) {
+	m_dragged_node = nullptr;
+	m_link_active = false;
+	m_builder = _builder;
 }
 
 void ui_state_manager::on_window_mouse_change(mars::window&, const mars::window_mouse_state& _mouse_state, ui_state_manager& _manager) {
@@ -134,6 +149,13 @@ void ui_state_manager::select_node(graph_builder_node* _node) const {
 
 	for (graph_builder_node& node : *m_builder)
 		node.selected = &node == _node;
+	
+	if (m_selection) {
+		if (_node)
+			m_selection->select_node(_node);
+		else
+			m_selection->clear_selection();
+	}
 }
 
 void ui_state_manager::on_mouse_motion(const mars::window_mouse_state& _mouse_state) {
@@ -205,7 +227,15 @@ void ui_state_manager::render_links() {
 	draw_bezier(calculate_bezier_curve(begin_position, end_position, blackboard_zoom()), m_link_start.color, 2.0f);
 }
 
-void ui_state_manager::render() {
+void ui_state_manager::open_variable_drop_menu(std::size_t _variable_index, const mars::vector2<float>& _screen_position) {
+	m_dropped_variable_index = _variable_index;
+	m_dropped_variable_position = _screen_position;
+	m_variable_popup_open_requested = true;
+}
+
+ui_state_manager::render_result ui_state_manager::render() {
+	render_result result = {};
+
 	if (m_pending_right_click_release) {
 		m_pending_right_click_release = false;
 		if (!m_link_active && hit_node(m_pending_screen_position) == nullptr) {
@@ -225,6 +255,7 @@ void ui_state_manager::render() {
 			ImGui::TextDisabled("No registered nodes");
 		else {
 			for (const node_registry_entry& entry : m_registry->registered_nodes()) {
+				if (entry.hidden) continue;
 				if (ImGui::Selectable(entry.name.data()) && m_builder != nullptr) {
 					const mars::vector2<float> canvas_position = blackboard_screen_to_canvas(m_popup_position);
 					m_builder->add(entry, {
@@ -237,6 +268,28 @@ void ui_state_manager::render() {
 		}
 		ImGui::EndPopup();
 	}
+
+	if (m_variable_popup_open_requested) {
+		ImGui::SetNextWindowPos({ m_dropped_variable_position.x, m_dropped_variable_position.y }, ImGuiCond_Always);
+		ImGui::OpenPopup("rv_variable_drop_menu", ImGuiPopupFlags_None);
+		m_variable_popup_open_requested = false;
+	}
+
+	if (ImGui::BeginPopup("rv_variable_drop_menu")) {
+		if (ImGui::Selectable("Get")) {
+			result.create_variable_node = { m_dropped_variable_index, false };
+			result.drop_position = m_dropped_variable_position;
+			ImGui::CloseCurrentPopup();
+		}
+		if (ImGui::Selectable("Set")) {
+			result.create_variable_node = { m_dropped_variable_index, true };
+			result.drop_position = m_dropped_variable_position;
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::EndPopup();
+	}
+
+	return result;
 }
 
 graph_builder_node* ui_state_manager::hit_node(const mars::vector2<float>& _screen_position) const {

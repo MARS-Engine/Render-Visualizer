@@ -31,8 +31,8 @@ struct graph_builder_node {
 	std::uint16_t id = 0;
 	std::size_t type_hash = 0;
 	std::string_view name = {};
+	node_metadata metadata = {};
 	pin_draw_info_fn get_pin_draw_info = nullptr;
-	node_runtime_info runtime = {};
 	std::shared_ptr<void> instance = {};
 	mars::meta::type_erased_ptr instance_ptr = {};
 	bool selected = false;
@@ -42,18 +42,13 @@ struct graph_builder_node {
 };
 
 struct frame_pin_copy_operation {
-	std::size_t source_stack_index = 0;
-	const void* source_member_handle = nullptr;
-	pin_value_resolve_fn source_resolve = nullptr;
-	std::size_t target_stack_index = 0;
-	const void* target_member_handle = nullptr;
-	pin_value_resolve_fn target_resolve = nullptr;
+	mars::meta::type_erased_ptr source_ptr = {};
+	mars::meta::type_erased_ptr target_ptr = {};
 	pin_value_copy_fn copy_value = nullptr;
 };
 
 struct frame_execution_step {
-	std::size_t stack_index = 0;
-	std::size_t execute_member_index = 0;
+	mars::meta::type_erased_ptr instance_ptr = {};
 	node_execute_invoke_fn invoke = nullptr;
 	std::uint16_t node_id = 0;
 	std::vector<frame_pin_copy_operation> copy_operations = {};
@@ -61,7 +56,6 @@ struct frame_execution_step {
 
 struct graph_frame_build_result {
 	frame_stack stack = {};
-	std::vector<const void*> execute_members = {};
 	std::vector<frame_execution_step> steps = {};
 	std::size_t source_revision = 0;
 	bool valid = false;
@@ -93,8 +87,9 @@ public:
 		return add(node_registry_entry{
 			.type_hash = mars::hash::type_fingerprint_v<T>,
 			.name = node_reflection<T>::name,
+			.hidden = node_reflection<T>::hidden,
+			.metadata = node_reflection<T>::get_metadata(),
 			.get_pin_draw_info = &node_reflection<T>::get_pin_draw_info,
-			.get_runtime_info = &node_reflection<T>::get_runtime_info,
 			.create_instance = &detail::create_node_instance<T>
 		}, _position);
 	}
@@ -107,6 +102,7 @@ public:
 
 	bool remove_node(std::uint16_t _id);
 	bool remove_selected_node();
+	void clear_selection();
 
 	static void collect_pins(const graph_builder_node& _node, std::vector<pin_draw_data>& _inputs, std::vector<pin_draw_data>& _outputs);
 	static std::optional<pin_draw_data> find_pin(const graph_builder_node& _node, std::string_view _pin_name, bool _is_output);
@@ -117,8 +113,8 @@ public:
 	graph_frame_build_result build_frame() const;
 
 private:
-	static void start_node_pin_draw_info(std::vector<pin_draw_data>& _inputs, std::vector<pin_draw_data>& _outputs);
-	static node_runtime_info start_node_runtime_info();
+	static void start_node_pin_draw_info(mars::meta::type_erased_ptr _instance, std::vector<pin_draw_data>& _inputs, std::vector<pin_draw_data>& _outputs);
+	static node_metadata start_node_metadata();
 	static std::vector<graph_builder_pin_links> make_pin_links(pin_draw_info_fn _get_pin_draw_info);
 
 	void reset_with_start_node();

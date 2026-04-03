@@ -1,36 +1,18 @@
 cmake_minimum_required(VERSION 4.1)
 
-# Bootstrap the compiler from the custom toolchain on first configure.
-# DEFINED CACHE{} means the user explicitly passed -DCMAKE_CXX_COMPILER, so
-# we leave it alone in that case.
+if(NOT CUSTOM_CLANG_PATH AND CMAKE_CXX_COMPILER)
+    cmake_path(GET CMAKE_CXX_COMPILER FILENAME _custom_clang_name)
+    if(_custom_clang_name MATCHES "^clang([+][+]|-cl)?(\\.exe)?$")
+        cmake_path(GET CMAKE_CXX_COMPILER PARENT_PATH _custom_clang_bin_dir)
+        cmake_path(GET _custom_clang_bin_dir PARENT_PATH CUSTOM_CLANG_PATH)
+    endif()
+endif() 
+
 if(CUSTOM_CLANG_PATH AND NOT DEFINED CACHE{CMAKE_CXX_COMPILER})
     set(CMAKE_CXX_COMPILER "${CUSTOM_CLANG_PATH}/bin/clang++" CACHE FILEPATH "C++ compiler")
     set(CMAKE_C_COMPILER   "${CUSTOM_CLANG_PATH}/bin/clang"   CACHE FILEPATH "C compiler")
 endif()
 
-if(WIN32)
-    file(GLOB SDK_DIRS RELATIVE "${WIN_SDK_BIN_ROOT}" "${WIN_SDK_BIN_ROOT}/10.*")
-    if(SDK_DIRS)
-        list(SORT SDK_DIRS ORDER DESCENDING)
-        list(GET SDK_DIRS 0 ACTUAL_SDK_VER)
-        set(FINAL_SDK_PATH "${WIN_SDK_BIN_ROOT}/${ACTUAL_SDK_VER}/x64" CACHE PATH "Resolved Windows SDK x64 bin path" FORCE)
-    else()
-        message(FATAL_ERROR "Could not find Windows SDK bin folder.")
-    endif()
-
-    if(NOT CMAKE_RC_COMPILER)
-        find_program(RV_LLVM_RC NAMES llvm-rc llvm-rc.exe PATHS "${CUSTOM_CLANG_PATH}/bin" NO_DEFAULT_PATH)
-        find_program(RV_SDK_RC NAMES rc rc.exe PATHS "${FINAL_SDK_PATH}" NO_DEFAULT_PATH)
-
-        if(RV_LLVM_RC)
-            set(CMAKE_RC_COMPILER "${RV_LLVM_RC}" CACHE FILEPATH "Windows resource compiler")
-        elseif(RV_SDK_RC)
-            set(CMAKE_RC_COMPILER "${RV_SDK_RC}" CACHE FILEPATH "Windows resource compiler")
-        else()
-            message(FATAL_ERROR "Could not find a Windows resource compiler. Checked ${CUSTOM_CLANG_PATH}/bin and ${FINAL_SDK_PATH}.")
-        endif()
-    endif()
-endif()
 
 project(render_visualizer)
 

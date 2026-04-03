@@ -1,5 +1,7 @@
 #include <render_visualizer/runtime/graph_builder.hpp>
 
+#include <render_visualizer/node/node_reflection.hpp>
+
 #include <algorithm>
 #include <optional>
 #include <utility>
@@ -124,7 +126,7 @@ bool pure_dependencies_append(const rv::graph_builder& _graph, const rv::graph_b
 			_error_message = "Pin type mismatch between '" + std::string(source->pin_name) + "' and '" + std::string(input_pin.name) + "'";
 			return false;
 		}
-		if (!source->node->runtime.pure)
+		if (!source->node->metadata.pure)
 			continue;
 		if (!pure_node_append(_graph, *source->node, _ordered_steps, _local_visiting, _local_scheduled, _error_message))
 			return false;
@@ -153,13 +155,12 @@ rv::graph_builder_node& rv::graph_builder::add(std::size_t _type_hash, std::stri
 
 rv::graph_builder_node& rv::graph_builder::add(const node_registry_entry& _entry, const mars::vector2<float>& _position) {
 	const node_instance_storage instance = _entry.create_instance ? _entry.create_instance() : node_instance_storage {};
-	const node_runtime_info runtime = _entry.get_runtime_info ? _entry.get_runtime_info() : node_runtime_info {};
 	m_nodes.push_back({
 		.id = m_next_node_id++,
 		.type_hash = _entry.type_hash,
 		.name = _entry.name,
+		.metadata = _entry.metadata,
 		.get_pin_draw_info = _entry.get_pin_draw_info,
-		.runtime = runtime,
 		.instance = instance.storage,
 		.instance_ptr = instance.ptr,
 		.position = _position,
@@ -228,10 +229,15 @@ bool rv::graph_builder::remove_selected_node() {
 	return remove_node(node->id);
 }
 
+void rv::graph_builder::clear_selection() {
+	for (graph_builder_node& node : m_nodes)
+		node.selected = false;
+}
+
 void rv::graph_builder::collect_pins(const graph_builder_node& _node, std::vector<pin_draw_data>& _inputs, std::vector<pin_draw_data>& _outputs) {
 	if (_node.get_pin_draw_info == nullptr)
 		return;
-	_node.get_pin_draw_info(_inputs, _outputs);
+	_node.get_pin_draw_info(_node.instance_ptr, _inputs, _outputs);
 }
 
 std::optional<rv::pin_draw_data> rv::graph_builder::find_pin(const graph_builder_node& _node, std::string_view _pin_name, bool _is_output) {
@@ -259,18 +265,20 @@ bool rv::graph_builder::add_link(std::uint16_t _from_node_id, std::string_view _
 	if (!from_pin.has_value() || !to_pin.has_value())
 		return false;
 	
-		if (from_pin->kind != to_pin->kind || from_pin->type_hash != to_pin->type_hash)
+	if (from_pin->kind != to_pin->kind || from_pin->type_hash != to_pin->type_hash)
 		return false;
 
 	if (input_has_source(_to_node_id, _to_pin_name))
 		return false;
 
-	const auto pin_links_it = std::ranges::find_if(from_node->links, [&](const graph_builder_pin_links& _pin_links) {
+	auto pin_links_it = std::ranges::find_if(from_node->links, [&](const graph_builder_pin_links& _pin_links) {
 		return _pin_links.name == _from_pin_name;
 	});
 
-	if (pin_links_it == from_node->links.end())
-		return false;
+	if (pin_links_it == from_node->links.end()) {
+		from_node->links.push_back({.name = std::string(_from_pin_name)});
+		pin_links_it = from_node->links.end() - 1;
+	}
 
 	if (from_pin->kind == pin_kind::execution && !pin_links_it->targets.empty())
 		return false;
@@ -332,7 +340,7 @@ rv::graph_frame_build_result rv::graph_builder::build_frame() const {
 			return result;
 		}
 
-		if (current_node->runtime.pure) {
+		if (current_node->metadata.pure) {
 			result.error_message = "Execution chain cannot enter pure node '" + node_name(*current_node) + "'";
 			return result;
 		}
@@ -362,12 +370,12 @@ rv::graph_frame_build_result rv::graph_builder::build_frame() const {
 		if (mapped_index_find(stack_index_map, node->id).has_value())
 			continue;
 
-		if (!node->runtime.execute.valid()) {
+		if (node->metadata.operations.execute == nullptr) {
 			result.error_message = "Node '" + node_name(*node) + "' does not expose a valid execute function";
 			return result;
 		}
 		
-		if (node->instance_ptr.get<void>() == nullptr || node->runtime.copy_construct == nullptr || node->runtime.destroy == nullptr || node->runtime.instance_size == 0) {
+		if (node->instance_ptr.get<void>() == nullptr || node->metadata.operations.copy_construct == nullptr || node->metadata.operations.destroy == nullptr || node->metadata.instance_size == 0) {
 			result.error_message = "Node '" + node_name(*node) + "' is missing runtime instance data";
 			return result;
 		}
@@ -378,14 +386,14 @@ rv::graph_frame_build_result rv::graph_builder::build_frame() const {
 		});
 
 		stack_builder.add({
-			.size = node->runtime.instance_size,
-			.alignment = node->runtime.instance_alignment,
+			.size = node->metadata.instance_size,
+			.alignment = node->metadata.instance_alignment,
 			.name = node->name,
 			.node_id = node->id,
 			.type_hash = node->type_hash,
-			.source_instance = node->instance_ptr.get<void>(),
-			.copy_construct = node->runtime.copy_construct,
-			.destroy = node->runtime.destroy
+			.source_instance = node->instance_ptr,
+			.copy_construct = node->metadata.operations.copy_construct,
+			.destroy = node->metadata.operations.destroy
 		});
 	}
 
@@ -401,13 +409,10 @@ rv::graph_frame_build_result rv::graph_builder::build_frame() const {
 		}
 
 		frame_execution_step step = {
-			.stack_index = *stack_index,
-			.execute_member_index = result.execute_members.size(),
-			.invoke = node->runtime.execute.invoke,
+			.instance_ptr = mars::meta::type_erased_ptr(result.stack.entry_ptr(*stack_index)),
+			.invoke = node->metadata.operations.execute,
 			.node_id = node->id
 		};
-
-		result.execute_members.push_back(node->runtime.execute.member_handle);
 
 		std::vector<pin_draw_data> inputs;
 		std::vector<pin_draw_data> outputs;
@@ -421,8 +426,13 @@ rv::graph_frame_build_result rv::graph_builder::build_frame() const {
 			if (!input_source_find(*this, node->id, input_pin.name, source, result.error_message))
 				return result;
 			
-			if (!source.has_value())
+			if (!source.has_value()) {
+				if (input_pin.flags & rv::pin_flags::mandatory) {
+					result.error_message = "Input pin '" + std::string(input_pin.name) + "' on node '" + node_name(*node) + "' is mandatory but has no source";
+					return result;
+				}
 				continue;
+			}
 
 			if (source->node == nullptr) {
 				result.error_message = "Node '" + node_name(*node) + "' references a missing source node";
@@ -441,12 +451,12 @@ rv::graph_frame_build_result rv::graph_builder::build_frame() const {
 				return result;
 			}
 			
-			if (input_pin.member_handle == nullptr || input_pin.resolve_value == nullptr || input_pin.copy_value == nullptr) {
+			if (input_pin.ops.resolve_value == nullptr || input_pin.ops.copy_value == nullptr) {
 				result.error_message = "Input pin '" + std::string(input_pin.name) + "' on node '" + node_name(*node) + "' is missing runtime metadata";
 				return result;
 			}
 
-			if (source_pin->member_handle == nullptr || source_pin->resolve_value == nullptr) {
+			if (source_pin->ops.resolve_value == nullptr) {
 				result.error_message = "Output pin '" + std::string(source->pin_name) + "' on node '" + node_name(*source->node) + "' is missing runtime metadata";
 				return result;
 			}
@@ -465,13 +475,9 @@ rv::graph_frame_build_result rv::graph_builder::build_frame() const {
 			}
 
 			step.copy_operations.push_back({
-				.source_stack_index = *source_stack_index,
-				.source_member_handle = source_pin->member_handle,
-				.source_resolve = source_pin->resolve_value,
-				.target_stack_index = *stack_index,
-				.target_member_handle = input_pin.member_handle,
-				.target_resolve = input_pin.resolve_value,
-				.copy_value = input_pin.copy_value
+				.source_ptr = source_pin->ops.resolve_value(mars::meta::type_erased_ptr(result.stack.entry_ptr(*source_stack_index))),
+				.target_ptr = input_pin.ops.resolve_value(mars::meta::type_erased_ptr(result.stack.entry_ptr(*stack_index))),
+				.copy_value = input_pin.ops.copy_value
 			});
 		}
 
@@ -495,16 +501,16 @@ rv::graph_frame_build_result rv::graph_builder::build_frame() const {
 	return result;
 }
 
-void rv::graph_builder::start_node_pin_draw_info(std::vector<pin_draw_data>&, std::vector<pin_draw_data>& _outputs) {
+void rv::graph_builder::start_node_pin_draw_info(mars::meta::type_erased_ptr, std::vector<pin_draw_data>&, std::vector<pin_draw_data>& _outputs) {
 	_outputs.push_back({
 		.name = "exec_out",
-		.colour = pin_reflection<execution_pin_tag>::colour,
+		.colour = type_reflection<execution_pin_tag>::colour,
 		.type_hash = mars::hash::type_fingerprint_v<execution_pin_tag>,
-		.kind = pin_kind::execution
+		.kind = pin_kind::execution,
 	});
 }
 
-rv::node_runtime_info rv::graph_builder::start_node_runtime_info() {
+rv::node_metadata rv::graph_builder::start_node_metadata() {
 	return {};
 }
 
@@ -514,7 +520,7 @@ std::vector<rv::graph_builder_pin_links> rv::graph_builder::make_pin_links(pin_d
 
 	std::vector<pin_draw_data> inputs;
 	std::vector<pin_draw_data> outputs;
-	_get_pin_draw_info(inputs, outputs);
+	_get_pin_draw_info({}, inputs, outputs);
 
 	std::vector<graph_builder_pin_links> result;
 	result.reserve(outputs.size());
@@ -535,8 +541,8 @@ void rv::graph_builder::reset_with_start_node() {
 		.id = m_next_node_id++,
 		.type_hash = mars::hash::type_fingerprint_v<execution_pin_tag>,
 		.name = "Start",
+		.metadata = start_node_metadata(),
 		.get_pin_draw_info = &start_node_pin_draw_info,
-		.runtime = start_node_runtime_info(),
 		.position = { 80.0f, 140.0f },
 		.links = make_pin_links(&start_node_pin_draw_info)
 	});

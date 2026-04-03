@@ -15,7 +15,7 @@ struct frame_type_info {
 	std::string_view name = {};
 	std::uint16_t node_id = 0;
 	std::size_t type_hash = 0;
-	const void* source_instance = nullptr;
+	mars::meta::type_erased_ptr source_instance = {};
 	node_instance_copy_construct_fn copy_construct = nullptr;
 	node_instance_destroy_fn destroy = nullptr;
 };
