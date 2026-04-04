@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 4.1)
 
+message(STATUS "Toolchain file: ${CMAKE_TOOLCHAIN_FILE}")
+message(STATUS "Compiler being used: ${CMAKE_CXX_COMPILER}")
+
 if(NOT CUSTOM_CLANG_PATH AND CMAKE_CXX_COMPILER)
     cmake_path(GET CMAKE_CXX_COMPILER FILENAME _custom_clang_name)
     if(_custom_clang_name MATCHES "^clang([+][+]|-cl)?(\\.exe)?$")

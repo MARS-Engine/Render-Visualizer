@@ -138,7 +138,7 @@ int main(int _argc, char* _argv[]) {
 		if constexpr (mars::env::platform_win32)
 			ne_font = imgui_io.Fonts->AddFontFromFileTTF("C:/Windows/Fonts/segoeui.ttf", 16.0f);
 		else if constexpr (mars::env::platform_linux)
-			ne_font = imgui_io.Fonts->AddFontFromFileTTF("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16.0f);
+			ne_font = imgui_io.Fonts->AddFontFromFileTTF("/usr/share/fonts/noto/NotoSans-Regular.ttf", 16.0f);
 		rv::blackboard_font_set(ne_font, 16.0f);
 
 		rv::node_registry registry = {};

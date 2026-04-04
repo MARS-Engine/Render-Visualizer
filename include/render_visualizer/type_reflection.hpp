@@ -3,6 +3,7 @@
 #include <mars/math/vector3.hpp>
 #include <mars/hash/meta.hpp>
 #include <mars/meta/type_erased.hpp>
+#include <mars/utility/memory.hpp>
 
 #include <malloc.h>
 #include <memory>
@@ -90,7 +91,7 @@ struct variable {
 		if (memory) {
 			if (type && type->destroy)
 				type->destroy(memory);
-			_aligned_free(memory);
+			mars::aligned_free(memory);
 		}
 	}
 
@@ -100,10 +101,10 @@ struct variable {
 				if (memory) {
 					if (type && type->destroy)
 						type->destroy(memory);
-					_aligned_free(memory);
+					mars::aligned_free(memory);
 				}
 				type = &t;
-				memory = _aligned_malloc(type->alignment, type->size);
+				memory = mars::aligned_malloc(type->alignment, type->size);
 				if (memory && type->construct)
 					type->construct(memory);
 				break;
