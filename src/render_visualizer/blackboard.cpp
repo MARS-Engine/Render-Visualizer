@@ -124,6 +124,10 @@ ImU32 rv::mars_to_imgui_colour(const mars::vector3<unsigned char>& _color) {
 	return IM_COL32(_color.x, _color.y, _color.z, 255);
 }
 
+static void filter_drawable_pins(std::vector<rv::pin_draw_data>& _pins) {
+	std::erase_if(_pins, [](const rv::pin_draw_data& _p) { return _p.kind == rv::pin_kind::property; });
+}
+
 float rv::text_get_max_width(const std::vector<pin_draw_data>& _pins) {
 	float max_width = 0.0f;
 	ImFont* font = blackboard_font();
@@ -165,6 +169,8 @@ mars::vector2<float> rv::calculate_node_size(const graph_builder_node& _node) {
 	std::vector<pin_draw_data> inputs;
 	std::vector<pin_draw_data> outputs;
 	graph_builder::collect_pins(_node, inputs, outputs);
+	filter_drawable_pins(inputs);
+	filter_drawable_pins(outputs);
 
 	const node_layout layout = node_layout_calculate({}, _node.name, inputs, outputs);
 	return { layout.size.x, layout.size.y };
@@ -174,6 +180,8 @@ mars::vector2<float> rv::calculate_pin_position(const graph_builder_node& _node,
 	std::vector<pin_draw_data> inputs;
 	std::vector<pin_draw_data> outputs;
 	graph_builder::collect_pins(_node, inputs, outputs);
+	filter_drawable_pins(inputs);
+	filter_drawable_pins(outputs);
 
 	const node_layout layout = node_layout_calculate(
 		blackboard_canvas_to_screen({ _node.position.x, _node.position.y }),
@@ -269,6 +277,8 @@ void rv::node_draw(graph_builder_node& _node) {
 	std::vector<pin_draw_data> inputs;
 	std::vector<pin_draw_data> outputs;
 	graph_builder::collect_pins(_node, inputs, outputs);
+	filter_drawable_pins(inputs);
+	filter_drawable_pins(outputs);
 	_node.size = calculate_node_size(_node);
 	node_draw(blackboard_draw_list(), imgui_vec(blackboard_canvas_to_screen({ _node.position.x, _node.position.y })), _node.name, inputs, outputs, _node.selected);
 }

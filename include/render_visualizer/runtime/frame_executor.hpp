@@ -13,6 +13,7 @@
 namespace rv {
 
 class selection_manager;
+class type_registry;
 
 struct execution_event {
 	void on_start_requested();
@@ -36,7 +37,7 @@ public:
 	void create_function(std::string _name);
 	void select_function(std::size_t _index);
 	void delete_function(std::size_t _index);
-	void create_variable(std::string _name);
+	void create_variable(std::string _name, const type_registry& _type_registry);
 	void delete_variable(std::size_t _index, selection_manager& _selection);
 	bool remove_selected_node();
 

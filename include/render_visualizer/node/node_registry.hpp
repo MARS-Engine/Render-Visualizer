@@ -9,6 +9,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -37,6 +38,7 @@ node_instance_storage create_node_instance() {
 
 struct node_registry_entry {
 	std::size_t type_hash = 0;
+	std::string type_key = {};
 	std::string_view name = {};
 	bool hidden = false;
 	node_metadata metadata = {};
@@ -60,6 +62,7 @@ public:
 	void register_node() {
 		add({
 			.type_hash = mars::hash::type_fingerprint_v<T>,
+			.type_key = std::string(mars::hash::type_fingerprint_string<T>()),
 			.name = node_reflection<T>::name,
 			.hidden = node_reflection<T>::hidden,
 			.metadata = node_reflection<T>::get_metadata(),

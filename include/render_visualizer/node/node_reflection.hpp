@@ -6,6 +6,7 @@
 #include <mars/math/vector3.hpp>
 #include <mars/meta.hpp>
 #include <mars/meta/type_erased.hpp>
+#include <mars/parser/json/json.hpp>
 #include <mars/utility/enum_flags.hpp>
 
 #include <render_visualizer/node/node_metadata.hpp>
@@ -34,7 +35,8 @@ namespace rv {
 
 enum class pin_kind {
 	data,
-	execution
+	execution,
+	property
 };
 
 template<>
@@ -130,6 +132,24 @@ void invoke_execute_member(mars::meta::type_erased_ptr _instance, mars::meta::ty
 	}
 }
 
+template<typename T>
+void stringify_pin_value(mars::meta::type_erased_ptr _value, std::string& _out) {
+	if (T* val = _value.get<T>()) 
+		mars::json::json_type_parser<T>::stringify(*val, _out);
+}
+
+template<typename T>
+bool parse_pin_value(mars::meta::type_erased_ptr _value, std::string_view _json, const std::vector<std::unique_ptr<rv::variable>>& _variables) {
+	if (T* val = _value.get<T>()) {
+		std::string wrapped(_json);
+		wrapped += ',';
+		std::string_view wrapped_view = wrapped;
+		return mars::json::json_type_parser<T>::parse(wrapped_view, *val, _variables) != wrapped_view.begin();
+	}
+	
+	return false;
+}
+
 template<std::meta::info Mem>
 consteval pin_draw_data make_data_pin() {
 	using value_t = [:std::meta::type_of(Mem):];
@@ -142,7 +162,9 @@ consteval pin_draw_data make_data_pin() {
 		.ops = {
 			.resolve_value = &resolve_pin_value<(&[:Mem:])>,
 			.copy_value = nullptr,
-			.render_inspector = &render_pin_inspector<value_t>
+			.render_inspector = &render_pin_inspector<value_t>,
+			.json_stringify = &stringify_pin_value<value_t>,
+			.json_parse = &parse_pin_value<value_t>
 		}
 	};
 
@@ -250,6 +272,27 @@ struct node_reflection {
 			}
 		}
 
+		template for (constexpr auto mem : std::define_static_array(std::meta::nonstatic_data_members_of(^^T, ctx))) {
+			constexpr bool is_stack_only = mars::meta::has_annotation<stack_annotation>(mem) && !mars::meta::has_annotation<input_annotation>(mem);
+			if constexpr (is_stack_only) {
+				using member_t = [:std::meta::type_of(mem):];
+				pin_draw_data data = {
+					.name = std::define_static_string(std::meta::identifier_of(mem)),
+					.colour = {},
+					.type_hash = 0,
+					.kind = pin_kind::property,
+					.ops = {
+						.resolve_value = &detail::resolve_pin_value<(&[:mem:])>,
+						.copy_value = nullptr,
+						.render_inspector = nullptr,
+						.json_stringify = &detail::stringify_pin_value<member_t>,
+						.json_parse = &detail::parse_pin_value<member_t>
+					}
+				};
+				_inputs.push_back(data);
+			}
+		}
+
 		template for (constexpr auto mem : std::define_static_array(std::meta::members_of(^^T, ctx))) {
 			if constexpr (std::meta::is_function(mem) && !std::meta::is_special_member_function(mem) && mars::meta::has_annotation<pins_override_annotation>(mem)) {
 				const T* instance = _instance.get<T>();
@@ -272,3 +315,40 @@ struct node_reflection {
 
 } // namespace rv
 
+namespace mars::json {
+
+template<>
+struct json_type_parser<const rv::variable*> : public json_type_parser_base<const rv::variable*> {
+	template <typename... Args>
+	inline static std::string_view::iterator parse(const std::string_view& _json, const rv::variable*& _value, const std::vector<std::unique_ptr<rv::variable>>& _variables, Args&&... /*_args*/) {
+		std::string name;
+		auto end = json_type_parser<std::string>::parse(_json, name);
+		
+		if (end == _json.end())
+			return _json.end();
+
+		if (name.empty()) {
+			_value = nullptr;
+			return end;
+		}
+
+		const auto var_it = std::ranges::find_if(_variables, [&](const std::unique_ptr<rv::variable>& _var) {
+			return _var && _var->name == name;
+		});
+		
+		if (var_it == _variables.end())
+			return _json.end();
+
+		_value = var_it->get();
+		return end;
+	}
+
+	inline static void stringify(const rv::variable*& _value, std::string& _out) {
+		std::string name = _value ? _value->name : "";
+		json_type_parser<std::string>::stringify(name, _out);
+	}
+
+	static constexpr bool string_support = true;
+};
+
+} // namespace mars::json

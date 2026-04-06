@@ -104,14 +104,17 @@ bool pure_dependencies_append(const rv::graph_builder& _graph, const rv::graph_b
 	rv::graph_builder::collect_pins(_node, inputs, outputs);
 
 	for (const rv::pin_draw_data& input_pin : inputs) {
-		if (input_pin.kind == rv::pin_kind::execution)
+		if (input_pin.kind == rv::pin_kind::execution || input_pin.kind == rv::pin_kind::property)
 			continue;
 
 		std::optional<input_source_ref> source = {};
+
 		if (!input_source_find(_graph, _node.id, input_pin.name, source, _error_message))
 			return false;
+
 		if (!source.has_value())
 			continue;
+		
 		if (source->node == nullptr) {
 			_error_message = "Node '" + node_name(_node) + "' references a missing input source";
 			return false;
@@ -158,6 +161,7 @@ rv::graph_builder_node& rv::graph_builder::add(const node_registry_entry& _entry
 	m_nodes.push_back({
 		.id = m_next_node_id++,
 		.type_hash = _entry.type_hash,
+		.type_key = _entry.type_key,
 		.name = _entry.name,
 		.metadata = _entry.metadata,
 		.get_pin_draw_info = _entry.get_pin_draw_info,
@@ -166,6 +170,7 @@ rv::graph_builder_node& rv::graph_builder::add(const node_registry_entry& _entry
 		.position = _position,
 		.links = make_pin_links(_entry.get_pin_draw_info)
 	});
+
 	mark_runtime_dirty();
 	return m_nodes.back();
 }
@@ -419,7 +424,7 @@ rv::graph_frame_build_result rv::graph_builder::build_frame() const {
 		collect_pins(*node, inputs, outputs);
 
 		for (const pin_draw_data& input_pin : inputs) {
-			if (input_pin.kind == pin_kind::execution)
+			if (input_pin.kind == pin_kind::execution || input_pin.kind == pin_kind::property)
 				continue;
 
 			std::optional<input_source_ref> source = {};
@@ -540,6 +545,7 @@ void rv::graph_builder::reset_with_start_node() {
 	m_nodes.push_back({
 		.id = m_next_node_id++,
 		.type_hash = mars::hash::type_fingerprint_v<execution_pin_tag>,
+		.type_key = std::string(mars::hash::type_fingerprint_string<execution_pin_tag>()),
 		.name = "Start",
 		.metadata = start_node_metadata(),
 		.get_pin_draw_info = &start_node_pin_draw_info,

@@ -39,6 +39,8 @@ std::optional<resolved_pin> pin_resolve(const graph_builder_node& _node, std::st
 	std::vector<pin_draw_data> inputs;
 	std::vector<pin_draw_data> outputs;
 	graph_builder::collect_pins(_node, inputs, outputs);
+	std::erase_if(inputs, [](const pin_draw_data& _p) { return _p.kind == pin_kind::property; });
+	std::erase_if(outputs, [](const pin_draw_data& _p) { return _p.kind == pin_kind::property; });
 
 	const std::vector<pin_draw_data>& pins = _is_output ? outputs : inputs;
 	const std::optional<std::size_t> pin_index = pin_index_find(pins, _pin_name);
@@ -60,8 +62,8 @@ ui_state_manager::ui_state_manager(graph_builder* _builder, const node_registry*
 	}
 }
 
-void ui_state_manager::on_selection_manager_changed(const mars::meta::type_erased_ptr& _selection, ui_state_manager& _manager) {
-	if (_manager.m_builder && _selection.get<graph_builder_node>() == nullptr) {
+void ui_state_manager::on_selection_manager_changed(const mars::meta::type_erased_ptr&, ui_state_manager& _manager) {
+	if (_manager.m_builder && (_manager.m_selection == nullptr || _manager.m_selection->selected_node() == nullptr)) {
 		_manager.m_builder->clear_selection();
 	}
 }
@@ -321,6 +323,8 @@ std::optional<ui_state_manager::hit_pin_result> ui_state_manager::hit_pin(const 
 		std::vector<pin_draw_data> inputs;
 		std::vector<pin_draw_data> outputs;
 		graph_builder::collect_pins(*node_it, inputs, outputs);
+		std::erase_if(inputs, [](const pin_draw_data& _p) { return _p.kind == pin_kind::property; });
+		std::erase_if(outputs, [](const pin_draw_data& _p) { return _p.kind == pin_kind::property; });
 
 		for (std::size_t pin_index = 0; pin_index < outputs.size(); ++pin_index) {
 			const mars::vector2<float> pin_position = calculate_pin_position(*node_it, pin_index, true);

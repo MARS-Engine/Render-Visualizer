@@ -1,5 +1,6 @@
 #include <render_visualizer/runtime/frame_executor.hpp>
 
+#include <render_visualizer/type_registry.hpp>
 #include <render_visualizer/ui/selection_manager.hpp>
 
 #include <mars/debug/logger.hpp>
@@ -46,10 +47,10 @@ void frame_executor::delete_function(std::size_t _index) {
 		--m_active_function;
 }
 
-void frame_executor::create_variable(std::string _name) {
+void frame_executor::create_variable(std::string _name, const type_registry& _type_registry) {
 	auto v = std::make_unique<variable>();
 	v->name = std::move(_name);
-	v->set_type(mars::hash::type_fingerprint_v<float>);
+	v->set_type(mars::hash::type_fingerprint_v<float>, _type_registry);
 	m_global_variables.push_back(std::move(v));
 }
 

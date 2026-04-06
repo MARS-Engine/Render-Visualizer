@@ -64,4 +64,4 @@ void process_data(std::vector<int>& _data) {
 
 
 ## Compiling Rules
-When compiling always use the efficient-compiler tool. Never under any circumstances should you call ninja or cmake manually. If you want to compile always use efficient-compiler tool. if you cannot do not use anything
+When compiling always use the local_compile tool. Never under any circumstances should you call ninja or cmake manually. If you want to compile always use local_compile tool. if you cannot do not use anything

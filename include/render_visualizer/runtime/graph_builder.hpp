@@ -30,6 +30,7 @@ struct graph_builder_pin_links {
 struct graph_builder_node {
 	std::uint16_t id = 0;
 	std::size_t type_hash = 0;
+	std::string type_key = {};
 	std::string_view name = {};
 	node_metadata metadata = {};
 	pin_draw_info_fn get_pin_draw_info = nullptr;
@@ -86,6 +87,7 @@ public:
 	graph_builder_node& add(const mars::vector2<float>& _position) {
 		return add(node_registry_entry{
 			.type_hash = mars::hash::type_fingerprint_v<T>,
+			.type_key = std::string(mars::hash::type_fingerprint_string<T>()),
 			.name = node_reflection<T>::name,
 			.hidden = node_reflection<T>::hidden,
 			.metadata = node_reflection<T>::get_metadata(),

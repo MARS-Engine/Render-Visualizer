@@ -3,6 +3,7 @@
 #include <mars/math/vector3.hpp>
 #include <mars/hash/meta.hpp>
 #include <mars/meta/type_erased.hpp>
+#include <mars/parser/json/json.hpp>
 #include <mars/utility/memory.hpp>
 
 #include <malloc.h>
@@ -15,31 +16,32 @@ namespace rv {
 
 template<typename T>
 struct type_reflection {
-static constexpr std::string_view name = "Unknown";
-static constexpr mars::vector3<unsigned char> colour = { 128, 128, 128 };
+	static constexpr std::string_view name = "Unknown";
+	static constexpr mars::vector3<unsigned char> colour = { 128, 128, 128 };
 };
 
 template<>
 struct type_reflection<float> {
-static constexpr std::string_view name = "Float";
-static constexpr mars::vector3<unsigned char> colour = { 173, 216, 230 };
+	static constexpr std::string_view name = "Float";
+	static constexpr mars::vector3<unsigned char> colour = { 173, 216, 230 };
 };
 
 template<>
 struct type_reflection<int> {
-static constexpr std::string_view name = "Int";
-static constexpr mars::vector3<unsigned char> colour = { 144, 238, 144 };
+	static constexpr std::string_view name = "Int";
+	static constexpr mars::vector3<unsigned char> colour = { 144, 238, 144 };
 };
 
 template<>
 struct type_reflection<bool> {
-static constexpr std::string_view name = "Bool";
-static constexpr mars::vector3<unsigned char> colour = { 255, 182, 193 };
+	static constexpr std::string_view name = "Bool";
+	static constexpr mars::vector3<unsigned char> colour = { 255, 182, 193 };
 };
 
 struct variable_type_desc {
 	std::string_view name;
 	std::size_t type_hash;
+	std::string type_key;
 	mars::vector3<unsigned char> colour;
 	std::size_t size;
 	std::size_t alignment;
@@ -47,6 +49,8 @@ struct variable_type_desc {
 	void (*destroy)(void*);
 	void (*copy_value)(mars::meta::type_erased_ptr, mars::meta::type_erased_ptr);
 	mars::meta::type_erased_ptr (*erase_ptr)(void*);
+	void (*json_stringify)(void*, std::string&);
+	bool (*json_parse)(std::string_view, void*);
 };
 
 template<typename T>
@@ -73,14 +77,36 @@ mars::meta::type_erased_ptr erase_ptr_default(void* _ptr) {
 	return mars::meta::type_erased_ptr(static_cast<T*>(_ptr));
 }
 
-inline std::span<const variable_type_desc> get_available_variable_types() {
-	static const variable_type_desc types[] = {
-		{ type_reflection<float>::name, mars::hash::type_fingerprint_v<float>, type_reflection<float>::colour, sizeof(float), alignof(float), &construct_default<float>, &destroy_default<float>, &copy_default<float>, &erase_ptr_default<float> },
-		{ type_reflection<int>::name, mars::hash::type_fingerprint_v<int>, type_reflection<int>::colour, sizeof(int), alignof(int), &construct_default<int>, &destroy_default<int>, &copy_default<int>, &erase_ptr_default<int> },
-		{ type_reflection<bool>::name, mars::hash::type_fingerprint_v<bool>, type_reflection<bool>::colour, sizeof(bool), alignof(bool), &construct_default<bool>, &destroy_default<bool>, &copy_default<bool>, &erase_ptr_default<bool> },
-	};
-	return types;
+template<typename T>
+void json_stringify_default(void* _ptr, std::string& _out) {
+	if (_ptr == nullptr)
+		return;
+
+	T& value = *static_cast<T*>(_ptr);
+	mars::json::json_type_parser<T>::stringify(value, _out);
 }
+
+template<typename T>
+bool json_parse_default(std::string_view _json, void* _ptr) {
+	if (_ptr == nullptr)
+		return false;
+
+	T& value = *static_cast<T*>(_ptr);
+	std::string wrapped_json(_json);
+	wrapped_json += ',';
+
+	const std::string_view wrapped_view = wrapped_json;
+	const auto parse_end = mars::json::json_type_parser<T>::parse(wrapped_view, value);
+	
+	if (parse_end == wrapped_view.end())
+		return false;
+
+	const auto trailing = mars::parse::first_space<false>(parse_end, wrapped_view.end());
+	return trailing != wrapped_view.end() && *trailing == ',';
+}
+
+// Forward-declared so variable can reference it in set_type without a circular include.
+class type_registry;
 
 struct variable {
 	std::string name;
@@ -95,22 +121,7 @@ struct variable {
 		}
 	}
 
-	void set_type(std::size_t _type_hash) {
-		for (const auto& t : get_available_variable_types()) {
-			if (t.type_hash == _type_hash) {
-				if (memory) {
-					if (type && type->destroy)
-						type->destroy(memory);
-					mars::aligned_free(memory);
-				}
-				type = &t;
-				memory = mars::aligned_malloc(type->alignment, type->size);
-				if (memory && type->construct)
-					type->construct(memory);
-				break;
-			}
-		}
-	}
+	void set_type(std::size_t _type_hash, const type_registry& _registry);
 };
 
-}
+} // namespace rv

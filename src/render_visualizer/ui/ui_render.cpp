@@ -58,7 +58,7 @@ bool rv::ui_contains_point(const mars::vector2<float>& _screen_position) {
 	return _screen_position.x <= left_edge || _screen_position.x >= right_edge;
 }
 
-rv::ui_render_result rv::ui_render(const std::vector<std::unique_ptr<rv::function_instance>>& _functions, std::size_t _active_function_index, const std::vector<std::unique_ptr<rv::variable>>& _variables, selection_manager& _selection, graph_builder& _graph, bool _running) {
+rv::ui_render_result rv::ui_render(const std::vector<std::unique_ptr<rv::function_instance>>& _functions, std::size_t _active_function_index, const std::vector<std::unique_ptr<rv::variable>>& _variables, selection_manager& _selection, graph_builder& _graph, bool _running, const type_registry& _type_registry) {
 	ui_render_result result = {};
 
 	ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -174,6 +174,12 @@ rv::ui_render_result rv::ui_render(const std::vector<std::unique_ptr<rv::functio
 			else
 				result.start_requested = true;
 		}
+		
+		if (ImGui::Button("Save", { -1.0f, 0.0f }))
+			result.save_requested = true;
+		if (ImGui::Button("Load", { -1.0f, 0.0f }))
+			result.load_requested = true;
+
 		ImGui::EndChild();
 
 		splitter_draw_y("##rv_right_drawer_splitter", &g_right_overview_height, g_min_inspect_height, std::max(g_min_inspect_height, right_drawer_available_y - g_min_inspect_height - g_splitter_thickness));
@@ -220,9 +226,9 @@ rv::ui_render_result rv::ui_render(const std::vector<std::unique_ptr<rv::functio
 			std::string current_type_name = var->type ? std::string(var->type->name) : "Unknown";
 
 			if (ImGui::BeginCombo("Type", current_type_name.c_str())) {
-				for (const auto& type_desc : rv::get_available_variable_types()) {
+				for (const auto& type_desc : _type_registry.registered_types()) {
 					if (ImGui::Selectable(type_desc.name.data(), var->type && type_desc.type_hash == var->type->type_hash)) {
-						var->set_type(type_desc.type_hash);
+						var->set_type(type_desc.type_hash, _type_registry);
 						result.graph_inputs_changed = true;
 					}
 				}

@@ -7,7 +7,9 @@
 #include <render_visualizer/nodes/print_node.hpp>
 #include <render_visualizer/nodes/variable_nodes.hpp>
 #include <render_visualizer/runtime/frame_executor.hpp>
+#include <render_visualizer/runtime/project_serialization.hpp>
 #include <render_visualizer/type_reflection.hpp>
+#include <render_visualizer/type_registry.hpp>
 #include <render_visualizer/ui/ui_render.hpp>
 #include <render_visualizer/ui/ui_state_manager.hpp>
 
@@ -30,10 +32,11 @@
 
 #include <SDL3/SDL_video.h>
 
+#include <filesystem>
+#include <fstream>
 #include <iostream>
-#include <memory>
+#include <string>
 #include <string_view>
-#include <utility>
 #include <vector>
 #include <malloc.h>
 
@@ -90,6 +93,39 @@ struct app_console_flags {
 	app_backend_option backend = app_backend_option::directx12;
 };
 
+std::filesystem::path default_project_path_get(const char* _argv0) {
+	std::filesystem::path exe_path = _argv0 ? std::filesystem::path(_argv0) : std::filesystem::current_path();
+	if (exe_path.has_parent_path())
+		return exe_path.parent_path() / "default.json";
+	return std::filesystem::current_path() / "default.json";
+}
+
+bool project_save(const std::filesystem::path& _path, const rv::frame_executor& _project) {
+	std::ofstream out(_path, std::ios::binary | std::ios::trunc);
+	if (!out.is_open())
+		return false;
+
+	const std::string json = rv::save_project_json(_project);
+	out.write(json.data(), static_cast<std::streamsize>(json.size()));
+	return out.good();
+}
+
+bool project_load(const std::filesystem::path& _path, rv::frame_executor& _project, const rv::node_registry& _registry, const rv::type_registry& _type_registry, std::string& _error_message) {
+	std::ifstream in(_path, std::ios::binary);
+	if (!in.is_open()) {
+		_error_message = "Failed to open file";
+		return false;
+	}
+
+	const std::string json((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+	if (!in.good() && !in.eof()) {
+		_error_message = "Failed to read file";
+		return false;
+	}
+
+	return rv::load_project_json(_project, _registry, _type_registry, json, _error_message);
+}
+
 } // namespace
 
 int main(int _argc, char* _argv[]) {
@@ -142,7 +178,9 @@ int main(int _argc, char* _argv[]) {
 		rv::blackboard_font_set(ne_font, 16.0f);
 
 		rv::node_registry registry = {};
+		rv::type_registry type_registry = {};
 		rv::selection_manager selection;
+		const std::filesystem::path default_project_path = default_project_path_get(_argc > 0 ? _argv[0] : nullptr);
 
 		rv::ui_state_manager ui_state(&g_project.active_function().graph, &registry, &selection);
 
@@ -221,7 +259,7 @@ int main(int _argc, char* _argv[]) {
 
 			const rv::ui_render_result ui_result = rv::ui_render(
 				g_project.functions(), g_project.active_function_index(),
-				g_project.global_variables(), selection, active_func.graph, g_project.running());
+				g_project.global_variables(), selection, active_func.graph, g_project.running(), type_registry);
 
 			const std::size_t prev_func = g_project.active_function_index();
 
@@ -229,6 +267,24 @@ int main(int _argc, char* _argv[]) {
 				g_project.start(g_project.active_function().graph);
 			if (ui_result.stop_requested)
 				g_project.stop();
+			if (ui_result.save_requested) {
+				if (project_save(default_project_path, g_project))
+					mars::logger::log(g_app_log_channel, "Saved project to " + default_project_path.string());
+				else
+					mars::logger::error(g_app_log_channel, "Failed to save project to " + default_project_path.string());
+			}
+			if (ui_result.load_requested) {
+				std::string load_error = {};
+				if (project_load(default_project_path, g_project, registry, type_registry, load_error)) {
+					selection.clear_selection();
+					ui_state.set_builder(&g_project.active_function().graph);
+					mars::logger::log(g_app_log_channel, "Loaded project from " + default_project_path.string());
+					if (!load_error.empty())
+						mars::logger::warning(g_app_log_channel, "Load warnings:\n{}", load_error);
+				}
+				else
+					mars::logger::error(g_app_log_channel, "Failed to load project from " + default_project_path.string() + ": " + load_error);
+			}
 			if (ui_result.graph_inputs_changed)
 				g_project.active_function().graph.mark_runtime_dirty();
 			if (ui_result.create_function_requested)
@@ -238,7 +294,7 @@ int main(int _argc, char* _argv[]) {
 			if (ui_result.delete_function_index.has_value())
 				g_project.delete_function(*ui_result.delete_function_index);
 			if (ui_result.create_variable_requested)
-				g_project.create_variable("New Variable " + std::to_string(g_project.global_variables().size()));
+				g_project.create_variable("New Variable " + std::to_string(g_project.global_variables().size()), type_registry);
 			if (ui_result.delete_variable_index.has_value())
 				g_project.delete_variable(*ui_result.delete_variable_index, selection);
 
